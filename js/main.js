@@ -162,7 +162,7 @@ const initPlanSelection = () => {
 };
 
 /**
- * Shows a confirmation after the enquiry form passes native validation.
+ * Validates sign-up enquiries, prevents duplicate emails, and stores valid signups.
  */
 const initSignupForm = () => {
   const signupForm = document.querySelector("#signup-form");
@@ -170,14 +170,103 @@ const initSignupForm = () => {
 
   if (!signupForm || !formMessage) return;
 
+  const nameInput = signupForm.querySelector("#full-name");
+  const emailInput = signupForm.querySelector("#email");
+  const planSelect = signupForm.querySelector("#plan");
+  const termsInput = signupForm.querySelector('[name="terms"]');
+  if (!nameInput || !emailInput || !planSelect || !termsInput) return;
+
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const fields = [
+    { input: nameInput, errorId: "name-error", validate: () => nameInput.value.trim().length >= 2, message: "Please enter at least 2 characters for your name." },
+    { input: emailInput, errorId: "email-error", validate: () => emailPattern.test(emailInput.value.trim()), message: "Please enter a valid email address." },
+    { input: planSelect, errorId: "plan-error", validate: () => planSelect.value !== "", message: "Please choose a plan." },
+    { input: termsInput, errorId: "terms-error", validate: () => termsInput.checked, message: "Please agree to the terms to continue." },
+  ];
+
+  const setFieldError = (field, message) => {
+    const error = document.getElementById(field.errorId);
+    if (!error) return;
+
+    error.textContent = message;
+    if (message) {
+      field.input.setAttribute("aria-invalid", "true");
+    } else {
+      field.input.removeAttribute("aria-invalid");
+    }
+  };
+
+  const clearFormMessage = () => {
+    formMessage.textContent = "";
+    formMessage.classList.remove("is-error");
+  };
+
+  fields.forEach((field) => {
+    const eventName = field.input === planSelect || field.input === termsInput ? "change" : "input";
+    field.input.addEventListener(eventName, () => {
+      clearFormMessage();
+      if (field.input.getAttribute("aria-invalid") !== "true") return;
+      setFieldError(field, field.validate() ? "" : field.message);
+    });
+  });
+
   signupForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    if (!signupForm.reportValidity()) return;
 
-    const formData = new FormData(signupForm);
-    const name = formData.get("name");
-    formMessage.textContent = `Thanks, ${name}! Your enquiry is ready. Our team will be in touch soon.`;
+    clearFormMessage();
+    const hasErrors = fields.reduce((invalid, field) => {
+      const isValid = field.validate();
+      setFieldError(field, isValid ? "" : field.message);
+      return invalid || !isValid;
+    }, false);
+    if (hasErrors) {
+      const firstInvalidField = fields.find((field) => !field.validate());
+      if (firstInvalidField) firstInvalidField.input.focus();
+      return;
+    }
+
+    const name = nameInput.value.trim();
+    const email = emailInput.value.trim();
+    const plan = planSelect.value;
+    let signups;
+
+    try {
+      const storedSignups = localStorage.getItem("signups");
+      signups = storedSignups ? JSON.parse(storedSignups) : [];
+      if (!Array.isArray(signups)) {
+        throw new TypeError('The "signups" localStorage entry must contain an array.');
+      }
+    } catch (error) {
+      console.error("Unable to read saved signups from localStorage.", error);
+      formMessage.textContent = "We couldn’t check saved signups. Please try again.";
+      formMessage.classList.add("is-error");
+      return;
+    }
+
+    const emailExists = signups.some((signup) =>
+      signup && typeof signup.email === "string" && signup.email.trim().toLowerCase() === email.toLowerCase()
+    );
+    if (emailExists) {
+      formMessage.textContent = "You've already signed up";
+      formMessage.classList.add("is-error");
+      emailInput.focus();
+      return;
+    }
+
+    signups.push({ name, email, plan, createdAt: new Date().toISOString() });
+
+    try {
+      localStorage.setItem("signups", JSON.stringify(signups));
+    } catch (error) {
+      console.error("Unable to save signup to localStorage.", error);
+      formMessage.textContent = "We couldn’t save your enquiry. Please try again.";
+      formMessage.classList.add("is-error");
+      return;
+    }
+
+    fields.forEach((field) => setFieldError(field, ""));
     signupForm.reset();
+    formMessage.textContent = `Thanks, ${name}! Your enquiry has been saved.`;
   });
 };
 
